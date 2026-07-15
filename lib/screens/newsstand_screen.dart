@@ -36,8 +36,8 @@ class _NewsstandScreenState extends State<NewsstandScreen> {
           return CustomScrollView(
             slivers: [
               SliverToBoxAdapter(child: _header()),
-              SliverConstrainedCrossAxis(
-                maxExtent: 640,
+              CenteredSliver(
+                maxWidth: 640,
                 sliver: SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
@@ -48,8 +48,8 @@ class _NewsstandScreenState extends State<NewsstandScreen> {
                   ),
                 ),
               ),
-              SliverConstrainedCrossAxis(
-                maxExtent: 640,
+              CenteredSliver(
+                maxWidth: 640,
                 sliver: SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
@@ -60,8 +60,8 @@ class _NewsstandScreenState extends State<NewsstandScreen> {
                   ),
                 ),
               ),
-              SliverConstrainedCrossAxis(
-                maxExtent: 640,
+              CenteredSliver(
+                maxWidth: 640,
                 sliver: SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 6),
@@ -73,8 +73,8 @@ class _NewsstandScreenState extends State<NewsstandScreen> {
                 ),
               ),
               SliverToBoxAdapter(child: _shelf()),
-              SliverConstrainedCrossAxis(
-                maxExtent: 640,
+              CenteredSliver(
+                maxWidth: 640,
                 sliver: SliverToBoxAdapter(child: _footer(context)),
               ),
             ],

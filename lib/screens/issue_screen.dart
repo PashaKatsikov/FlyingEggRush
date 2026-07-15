@@ -26,8 +26,8 @@ class IssueScreen extends StatelessWidget {
           return CustomScrollView(
             slivers: [
               SliverToBoxAdapter(child: _banner(context, read, total)),
-              SliverConstrainedCrossAxis(
-                maxExtent: 640,
+              CenteredSliver(
+                maxWidth: 640,
                 sliver: SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
@@ -38,8 +38,8 @@ class IssueScreen extends StatelessWidget {
                   ),
                 ),
               ),
-              SliverConstrainedCrossAxis(
-                maxExtent: 640,
+              CenteredSliver(
+                maxWidth: 640,
                 sliver: SliverPadding(
                   padding: const EdgeInsets.fromLTRB(16, 6, 16, 36),
                   sliver: SliverList.separated(

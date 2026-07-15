@@ -42,16 +42,17 @@ class _LoadingScreenState extends State<LoadingScreen>
 
     // Drive the bar to 90% over a comfortable minimum display time, then it
     // waits for the real work to finish before topping up to 100%.
-    _barController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2400),
-      lowerBound: 0.0,
-      upperBound: 0.9,
-    )
-      ..addStatusListener((status) {
-        if (status == AnimationStatus.completed) _maybeFinish();
-      })
-      ..forward();
+    _barController =
+        AnimationController(
+            vsync: this,
+            duration: const Duration(milliseconds: 2400),
+            lowerBound: 0.0,
+            upperBound: 0.9,
+          )
+          ..addStatusListener((status) {
+            if (status == AnimationStatus.completed) _maybeFinish();
+          })
+          ..forward();
 
     _dotsTimer = Timer.periodic(const Duration(milliseconds: 450), (_) {
       if (mounted) setState(() => _dots = (_dots + 1) % 4);
@@ -94,6 +95,12 @@ class _LoadingScreenState extends State<LoadingScreen>
       curve: Curves.easeOut,
     );
     await Future<void>.delayed(const Duration(milliseconds: 220));
+
+    // The rest of the app (everything but this loading screen) is portrait
+    // only, on iPhone AND iPad — lock it back down before we navigate away.
+    await SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.portraitUp,
+    ]);
 
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
@@ -202,7 +209,11 @@ class _LoadingBar extends StatelessWidget {
                   child: Container(
                     decoration: const BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [AppColors.deepGold, AppColors.gold, Color(0xFFFFE08A)],
+                        colors: [
+                          AppColors.deepGold,
+                          AppColors.gold,
+                          Color(0xFFFFE08A),
+                        ],
                       ),
                       borderRadius: BorderRadius.all(Radius.circular(10)),
                     ),

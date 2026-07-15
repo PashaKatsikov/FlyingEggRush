@@ -91,6 +91,25 @@ class ResponsiveContent extends StatelessWidget {
   }
 }
 
+/// Sliver counterpart of [ResponsiveContent]: centers its sliver child inside
+/// a [CustomScrollView] by adding equal side padding, instead of pinning it
+/// to the leading edge like [SliverConstrainedCrossAxis] does.
+class CenteredSliver extends StatelessWidget {
+  const CenteredSliver({super.key, required this.sliver, this.maxWidth = 640});
+  final Widget sliver;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final inset = width > maxWidth ? (width - maxWidth) / 2 : 0.0;
+    return SliverPadding(
+      padding: EdgeInsets.symmetric(horizontal: inset),
+      sliver: sliver,
+    );
+  }
+}
+
 /// A reusable "magazine page" scaffold: aged-paper background, a thin printed
 /// frame, a compact masthead header with a back button, section label, and the
 /// page title — then your body.
