@@ -11,6 +11,7 @@ class PerchVault {
   static const _kMode = '${RookeryConfig.storagePrefix}.mode';
   static const _kCooldown = '${RookeryConfig.storagePrefix}.invite_cooldown';
   static const _kOsDenied = '${RookeryConfig.storagePrefix}.os_denied';
+  static const _kAccepted = '${RookeryConfig.storagePrefix}.invite_accepted';
   static const _kSavedUrl = '${RookeryConfig.storagePrefix}.saved_url';
   static const _kSavedExpires = '${RookeryConfig.storagePrefix}.saved_expires';
   static const _kOneShotUrl = '${RookeryConfig.storagePrefix}.one_shot_url';
@@ -64,8 +65,15 @@ class PerchVault {
     return v;
   }
 
+  /// Whether the opt-in screen should be shown on this boot.
+  ///
+  /// The user must NEVER see the prompt again once they have either
+  /// tapped Accept (regardless of the OS dialog outcome — that's a system
+  /// concern), or the OS explicitly denied permission on our behalf.
+  /// Skip → hide for `RookeryConfig.pushCooldown` (3 days), then re-show.
   Future<bool> needsPushPrompt() async {
     final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_kAccepted) == true) return false;
     if (prefs.getBool(_kOsDenied) == true) return false;
     final cooldownUntil = prefs.getInt(_kCooldown) ?? 0;
     return DateTime.now().millisecondsSinceEpoch >= cooldownUntil;
@@ -77,6 +85,14 @@ class PerchVault {
         .add(RookeryConfig.pushCooldown)
         .millisecondsSinceEpoch;
     await prefs.setInt(_kCooldown, until);
+  }
+
+  /// Persist that the user tapped "Allow notifications". After this the
+  /// prompt is never shown again — the system dialog outcome is out of our
+  /// hands (see gray_flow_guide.md §push opt-in).
+  Future<void> markInviteAccepted() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kAccepted, true);
   }
 
   Future<void> markOsDenied() async {

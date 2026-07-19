@@ -42,6 +42,10 @@ class _WingInvitationState extends State<WingInvitation> {
   Future<void> _accept() async {
     if (_busy) return;
     setState(() => _busy = true);
+    // Record the accept decision BEFORE showing the system dialog so we
+    // never re-show this screen even if the user backgrounds the app on
+    // top of the OS prompt (gray_flow_guide.md §push opt-in).
+    await widget.vault.markInviteAccepted();
     await widget.chirp.askPermission();
     final token = await widget.chirp.waitForTokenAfterConsent();
     if (!mounted) return;

@@ -51,7 +51,7 @@ class _NoWindPageState extends State<NoWindPage> {
           final btnWidth = isPortrait
               ? (size.width * 0.70).clamp(220.0, 380.0)
               : (size.width * 0.35).clamp(180.0, 320.0);
-          final content = Stack(
+          return Stack(
             fit: StackFit.expand,
             children: [
               Image.asset(
@@ -59,20 +59,23 @@ class _NoWindPageState extends State<NoWindPage> {
                 fit: BoxFit.cover,
                 filterQuality: FilterQuality.high,
               ),
-              Align(
-                alignment: isPortrait
-                    ? const Alignment(0, 0.75)
-                    : Alignment.center,
-                child: SizedBox(
-                  width: btnWidth,
-                  height: 56,
-                  child: _RetryButton(onPressed: _onRetry),
+              SafeArea(
+                minimum: EdgeInsets.only(
+                  bottom: isPortrait ? 24 : 16,
+                ),
+                child: Align(
+                  alignment: isPortrait
+                      ? const Alignment(0, 0.92)
+                      : const Alignment(0, 0.88),
+                  child: SizedBox(
+                    width: btnWidth,
+                    height: 56,
+                    child: _RetryButton(onPressed: _onRetry),
+                  ),
                 ),
               ),
             ],
           );
-          // Landscape: no SafeArea (buttons stay centered horizontally).
-          return isPortrait ? SafeArea(child: content) : content;
         },
       ),
     );

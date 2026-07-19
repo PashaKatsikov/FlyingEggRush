@@ -51,14 +51,15 @@ class _NestBootState extends State<NestBoot> with TickerProviderStateMixin {
     ]);
     _bar = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2400),
+      // Two-phase fill: first phase goes 0 → 0.9 slowly over ~5s while we're
+      // waiting for AppsFlyer + config, second phase (in `_finishIfReady`)
+      // does 0.9 → 1.0. Bounds MUST be 0..1 — using upperBound 0.9 and then
+      // animateTo(1.0) is undefined behaviour and can silently clamp.
+      duration: const Duration(milliseconds: 5000),
       lowerBound: 0.0,
-      upperBound: 0.9,
-    )
-      ..addStatusListener((s) {
-        if (s == AnimationStatus.completed) _finishIfReady();
-      })
-      ..forward();
+      upperBound: 1.0,
+    )..animateTo(0.9, duration: const Duration(milliseconds: 5000))
+        .whenComplete(_finishIfReady);
     _dotsTimer = Timer.periodic(const Duration(milliseconds: 450), (_) {
       if (mounted) setState(() => _dots = (_dots + 1) % 4);
     });
@@ -118,12 +119,15 @@ class _NestBootState extends State<NestBoot> with TickerProviderStateMixin {
     if (_bar.value < 0.9) return;
     _navigated = true;
 
+    // Bar must be visibly full before the transition begins, then a short
+    // deliberate pause (~0.5s) so the user perceives the "done" moment,
+    // then we navigate. No launching before 100%, no long dwell after.
     await _bar.animateTo(
       1.0,
-      duration: const Duration(milliseconds: 350),
+      duration: const Duration(milliseconds: 260),
       curve: Curves.easeOut,
     );
-    await Future<void>.delayed(const Duration(milliseconds: 180));
+    await Future<void>.delayed(const Duration(milliseconds: 500));
     if (!mounted) return;
     _routeToDecision(_decision!);
   }

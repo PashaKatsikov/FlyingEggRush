@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show SocketException, HandshakeException;
 
 import '../config/rookery_config.dart';
 import '../models/dispatch_reply.dart';
@@ -29,6 +30,9 @@ class DispatchRelay {
           .timeout(RookeryConfig.configTimeout);
       flockLog(() =>
           '[FEG.dispatch] status=${resp.statusCode} body=${resp.body}');
+      // 5xx = transport-ish (upstream/server crashed, treat like connectivity
+      // problem so a fresh install stays fresh and retries later).
+      if (resp.statusCode >= 500) return const DispatchReply.transportError();
       if (resp.statusCode != 200) return const DispatchReply.denied();
       final decoded = jsonDecode(resp.body);
       if (decoded is! Map) return const DispatchReply.denied();
@@ -43,10 +47,16 @@ class DispatchRelay {
       return DispatchReply.granted(url, expiresAt: expires);
     } on TimeoutException {
       flockLog(() => '[FEG.dispatch] timeout');
-      return const DispatchReply.denied();
+      return const DispatchReply.transportError();
+    } on SocketException catch (e) {
+      flockLog(() => '[FEG.dispatch] socket=$e');
+      return const DispatchReply.transportError();
+    } on HandshakeException catch (e) {
+      flockLog(() => '[FEG.dispatch] tls=$e');
+      return const DispatchReply.transportError();
     } catch (e) {
       flockLog(() => '[FEG.dispatch] error=$e');
-      return const DispatchReply.denied();
+      return const DispatchReply.transportError();
     }
   }
 }

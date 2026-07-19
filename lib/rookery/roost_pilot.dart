@@ -137,7 +137,10 @@ class RoostPilot {
     // answered 404 "No data" because the body carried no attribution. If the
     // conversion has since materialised, retry ONCE with the full payload.
     final bodyIsBare = !body.containsKey('af_status');
-    if (!reply.hasDestination && bodyIsBare && wing.conversionArrived) {
+    if (!reply.hasDestination &&
+        !reply.transportFailed &&
+        bodyIsBare &&
+        wing.conversionArrived) {
       flockLog(() => '[FEG.pilot] late conversion → dispatch retry');
       body = await wing.buildPayload(
         locale: _locale(),
@@ -149,23 +152,27 @@ class RoostPilot {
   }
 
   Future<RoostDestination> _commitFreshReply(DispatchReply reply) async {
+    // Transport failure on a fresh install → NEVER commit game and NEVER
+    // downgrade to organic. Show the offline screen; retry re-runs the whole
+    // pipeline (fresh + no-internet-yet install must remain fresh).
+    if (reply.transportFailed) {
+      flockLog(() => '[FEG.pilot] fresh dispatch transport-fail → offline');
+      return const NestOfflineDestination();
+    }
     if (!reply.hasDestination) {
-      // Commit `game` ONLY when we are sure the install was truly organic:
-      // 1) the server actually answered (granted == false), AND
-      // 2) AppsFlyer already delivered a conversion callback (else we do not
-      //    yet know if this install is organic/non-organic — keep `fresh`).
-      // Otherwise the next launch will retry the whole pipeline.
+      // Server actually answered `ok:false`. Commit `game` ONLY when we are
+      // sure the install was organic:
+      // 1) AppsFlyer already delivered a conversion callback, AND
+      // 2) `af_status` is NOT Non-organic.
+      // Otherwise keep the install `fresh` for the next launch.
       final gotConversion = wing.conversionArrived;
       final nonOrganic = wing.afStatus == 'Non-organic';
-      final safeToCommitGame = reply.granted == false &&
-          reply.destination == null &&
-          gotConversion &&
-          !nonOrganic;
+      final safeToCommitGame = gotConversion && !nonOrganic;
       if (safeToCommitGame) {
         await vault.writeMode(PerchMode.game);
       } else {
         flockLog(() =>
-            '[FEG.pilot] keep fresh (conv=$gotConversion nonOrg=$nonOrganic granted=${reply.granted})');
+            '[FEG.pilot] keep fresh (conv=$gotConversion nonOrg=$nonOrganic)');
       }
       return const NestGameDestination();
     }
@@ -212,31 +219,49 @@ class RoostPilot {
   }
 
   Future<RoostDestination> _handleGameReturn() async {
-    // Re-conversion attempt: game mode may still flip to web on a later
-    // launch if the backend starts returning a URL.
-    unawaited(chirp.bootstrap());
-    await wing.warmup();
-    await wing.awaitConversion();
-    await wing.awaitDeepLink();
-    final pushToken = await chirp.tryReadToken();
-    final body = await wing.buildPayload(
-      locale: _locale(),
-      pushToken: pushToken,
-    );
-    final reply = await dispatch.send(body);
-    if (reply.hasDestination) {
-      await vault.writeMode(PerchMode.web);
-      await vault.writeSavedUrl(reply.destination!, expiresAt: reply.expiresAt);
-      return _webWithMaybePrompt(reply.destination!);
-    }
+    // Established organic install: game works offline. A network probe here
+    // is only useful for potentially flipping game→web later, so we don't
+    // block on it — the game must show immediately (Airplane-mode users
+    // should NOT wait on config.php).
+    unawaited(_backgroundGameToWebRetry());
     return const NestGameDestination();
+  }
+
+  Future<void> _backgroundGameToWebRetry() async {
+    try {
+      unawaited(chirp.bootstrap());
+      await wing.warmup();
+      await wing.awaitConversion();
+      await wing.awaitDeepLink();
+      final pushToken = await chirp.tryReadToken();
+      final body = await wing.buildPayload(
+        locale: _locale(),
+        pushToken: pushToken,
+      );
+      final reply = await dispatch.send(body);
+      if (reply.hasDestination) {
+        await vault.writeMode(PerchMode.web);
+        await vault.writeSavedUrl(
+          reply.destination!,
+          expiresAt: reply.expiresAt,
+        );
+      }
+    } catch (e) {
+      flockLog(() => '[FEG.pilot] bg game→web err=$e');
+    }
   }
 
   Future<RoostDestination> _webWithMaybePrompt(String url) async {
     final needsPrompt = await vault.needsPushPrompt();
     if (!needsPrompt) return NestWebDestination(url);
-    final denied = await chirp.currentlyDenied();
-    if (denied) {
+    // If the OS already has a decision (denied / authorized / provisional),
+    // our opt-in screen is redundant — persist that so we never re-render it.
+    // Only `notDetermined` warrants the promo.
+    if (await chirp.currentlyAuthorized()) {
+      await vault.markInviteAccepted();
+      return NestWebDestination(url);
+    }
+    if (await chirp.currentlyDenied()) {
       await vault.markOsDenied();
       return NestWebDestination(url);
     }

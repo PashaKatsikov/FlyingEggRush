@@ -102,6 +102,16 @@ class ChirpHub {
     return s.authorizationStatus == AuthorizationStatus.denied;
   }
 
+  /// True when the OS has already granted (authorized or provisional)
+  /// notification permission. Our opt-in screen must never show in this
+  /// state — the system decision is already positive.
+  Future<bool> currentlyAuthorized() async {
+    if (!Platform.isIOS) return false;
+    final s = await _messaging.getNotificationSettings();
+    return s.authorizationStatus == AuthorizationStatus.authorized ||
+        s.authorizationStatus == AuthorizationStatus.provisional;
+  }
+
   static String? _extractUrl(Map<String, dynamic> data) {
     for (final k in const ['url', 'link', 'target', 'deeplink', 'deep_link']) {
       final v = data[k];
