@@ -26,6 +26,51 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>Flying Egg Rush uses your data to personalize your gameplay experience and offers.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Flying Egg Rush uses the camera so you can take a snapshot for your player profile.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Flying Egg Rush uses your photo library so you can pick an avatar for your player profile.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>paytmmp</string>
+		<string>paytm</string>
+		<string>phonepe</string>
+		<string>tez</string>
+		<string>gpay</string>
+		<string>upi</string>
+		<string>bhim</string>
+		<string>credpay</string>
+		<string>mobikwik</string>
+		<string>whatsapp</string>
+		<string>tg</string>
+		<string>telegram</string>
+		<string>viber</string>
+		<string>fb-messenger</string>
+		<string>tel</string>
+		<string>mailto</string>
+		<string>sms</string>
+		<string>itms-apps</string>
+		<string>itms-appss</string>
+		<string>maps</string>
+		<string>comgooglemaps</string>
+		<string>instagram</string>
+		<string>twitter</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

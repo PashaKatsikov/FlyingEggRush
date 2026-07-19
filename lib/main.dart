@@ -1,35 +1,35 @@
+import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import 'screens/loading_screen.dart';
+import 'rookery/flight_deck.dart';
+import 'rookery/infra/debug_flock.dart';
 import 'store.dart';
-import 'theme.dart';
 
-/// Single shared progress store for the whole app.
+/// Shared game-progress store used by the white-part screens.
 final ReaderStore store = ReaderStore();
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const ChickenTimesApp());
-}
 
-class ChickenTimesApp extends StatelessWidget {
-  const ChickenTimesApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flying Egg Rush',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        scaffoldBackgroundColor: AppColors.paper,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.gold,
-          brightness: Brightness.light,
-        ),
-        fontFamily: 'Georgia',
-      ),
-      home: const LoadingScreen(),
-    );
+  // Firebase and AppCheck are initialised in independent try/catch blocks:
+  // an AppCheck debug-token error must NEVER disable the gray flow
+  // (gray_flow_lessons.md #5).
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    flockLog(() => '[FEG.main] firebase err=$e');
   }
+  try {
+    await FirebaseAppCheck.instance.activate(
+      providerApple: kReleaseMode
+          ? const AppleDeviceCheckProvider()
+          : const AppleDebugProvider(),
+    );
+  } catch (e) {
+    flockLog(() => '[FEG.main] appcheck err=$e');
+  }
+
+  runApp(const FlightDeckApp());
 }

