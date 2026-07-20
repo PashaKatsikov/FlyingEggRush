@@ -76,7 +76,22 @@ class _NestBootState extends State<NestBoot> with TickerProviderStateMixin {
       flockLog(() => '[FEG.boot] pilot err=$e → game');
       _decision = const NestGameDestination();
     }
+    // Offline path must show NoWind immediately — no reason to sit through
+    // the 5s splash-bar fill when the pilot decided in <1s.
+    if (_decision is NestOfflineDestination) {
+      _navigateFast();
+      return;
+    }
     _finishIfReady();
+  }
+
+  void _navigateFast() {
+    if (_navigated) return;
+    if (_decision == null) return;
+    _navigated = true;
+    _bar.stop();
+    if (!mounted) return;
+    _routeToDecision(_decision!);
   }
 
   Future<void> _askAttAfterFirstFrame() async {

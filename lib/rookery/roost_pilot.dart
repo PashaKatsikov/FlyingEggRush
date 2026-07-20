@@ -87,21 +87,26 @@ class RoostPilot {
     final mode = await vault.readMode();
     flockLog(() => '[FEG.pilot] mode=$mode');
 
-    // 2. Connectivity: none → offline IMMEDIATELY (no probe).
-    final online = await sky.isOnline();
-    if (!online) {
-      flockLog(() => '[FEG.pilot] offline');
-      // fresh + web: show offline screen with retry.
-      // game: continue to game (works offline).
-      if (mode == PerchMode.game) return const NestGameDestination();
-      // For web mode, prefer the saved URL if we still have one.
-      if (mode == PerchMode.web) {
-        final saved = await vault.readSavedUrl();
-        if (saved != null && saved.isNotEmpty) {
-          return NestWebDestination(saved);
-        }
-      }
-      return const NestOfflineDestination();
+    // Fast path — no network interface at all (airplane mode / Wi-Fi off).
+    // Never trigger a reach probe here (gray_flow_lessons.md #2).
+    final tGate = DateTime.now();
+    final hasIf = await sky.hasInterface();
+    flockLog(() =>
+        '[FEG.pilot] hasInterface=$hasIf t=${DateTime.now().difference(tGate).inMilliseconds}ms');
+    if (!hasIf) {
+      return _offlineFallback(mode);
+    }
+
+    // Interface exists — validate REAL reachability with a raw TCP probe.
+    // DNS on iOS caches aggressively (a stale apple.com record can resolve
+    // while the device is fully offline); a TCP connect to a public anycast
+    // IP is the only reliable signal.
+    final tReach = DateTime.now();
+    final reachable = await sky.canReachNetwork();
+    flockLog(() =>
+        '[FEG.pilot] canReachNetwork=$reachable t=${DateTime.now().difference(tReach).inMilliseconds}ms');
+    if (!reachable) {
+      return _offlineFallback(mode);
     }
 
     switch (mode) {
@@ -112,6 +117,21 @@ class RoostPilot {
       case PerchMode.fresh:
         return _handleFresh();
     }
+  }
+
+  Future<RoostDestination> _offlineFallback(PerchMode mode) async {
+    // fresh: user hasn't seen the WebView yet and we cannot decide organic
+    // without attribution, so show NoWind and let retry re-run the pipeline.
+    // web: fall back to the last-known-good URL if we have one; else NoWind.
+    // game: established organic install works offline.
+    if (mode == PerchMode.game) return const NestGameDestination();
+    if (mode == PerchMode.web) {
+      final saved = await vault.readSavedUrl();
+      if (saved != null && saved.isNotEmpty) {
+        return NestWebDestination(saved);
+      }
+    }
+    return const NestOfflineDestination();
   }
 
   Future<RoostDestination> _handleFresh() async {
