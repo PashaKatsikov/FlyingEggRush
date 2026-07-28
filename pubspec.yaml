@@ -1,7 +1,7 @@
 name: flyingeggrushgame
 description: "Flying Egg Rush"
 publish_to: 'none'
-version: 1.0.1+3
+version: 1.0.1+4
 
 environment:
   sdk: ^3.12.2
@@ -48,6 +48,6 @@ flutter_launcher_icons:
   ios: true
   android: true
   remove_alpha_ios: true
-  image_path: "assets/icon.jpg"
+  image_path: "assets/icon3.png"
   adaptive_icon_background: "#7EC8E3"
-  adaptive_icon_foreground: "assets/icon.jpg"
+  adaptive_icon_foreground: "assets/icon3.png"
